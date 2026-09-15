@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Vídeo para MP3
+Comment=Converta gravações WebM e MP4 em áudio MP3
+Exec=/usr/bin/env python3 "__APP_DIR__/app.py"
+Path=__APP_DIR__
+Icon=audio-x-generic
+Terminal=false
+Categories=AudioVideo;Audio;
+Keywords=webm;mp4;mp3;converter;audio;video;
+StartupNotify=false
+StartupWMClass=video-to-mp3

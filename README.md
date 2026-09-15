@@ -37,14 +37,19 @@ removidos ao cancelar ou em caso de erro tratado.
 - Python 3.10 ou superior com PyGObject e GTK 3.20 ou superior;
 - FFmpeg e FFprobe no PATH, com o encoder `libmp3lame`.
 
-Esses requisitos já estavam disponíveis na máquina onde a aplicação foi criada.
-Não há dependências pip. Em outra máquina Debian/Ubuntu, os pacotes de sistema
-são `python3`, `python3-gi`, `gir1.2-gtk-3.0` e `ffmpeg`.
+Não há dependências pip. Em Debian/Ubuntu, os pacotes de sistema são:
+
+```bash
+sudo apt install python3 python3-gi gir1.2-gtk-3.0 ffmpeg
+```
+
+O `install.sh` avisa se algum deles estiver faltando.
 
 ## Verificar
 
+Na pasta do projeto:
+
 ```bash
-cd /home/luiz/projects/bee/webm-to-mp3
 python3 -m unittest -v
 ```
 

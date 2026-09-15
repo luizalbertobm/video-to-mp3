@@ -228,6 +228,6 @@ class ConverterApplication(Gtk.Application):
 
 
 if __name__ == '__main__':
-    GLib.set_prgname('webm-to-mp3')
+    GLib.set_prgname('video-to-mp3')
     GLib.set_application_name('Vídeo para MP3')
     sys.exit(ConverterApplication().run(sys.argv))
