@@ -61,6 +61,10 @@ quando disponíveis e ícones próprios. Ela não replica necessariamente o tema
 ## Desenvolvimento
 
 Requisitos: Python 3.10–3.13 e FFmpeg/FFprobe no `PATH` com `libmp3lame`.
+No Linux, rodar do fonte exige as mesmas bibliotecas de desktop do pacote, que
+o Qt carrega em tempo de execução. Em Ubuntu/Zorin:
+`sudo apt install libgl1 libegl1 libopengl0 libxcb-cursor0 libxkbcommon-x11-0`.
+Sem `libxcb-cursor0`, o Qt 6.5+ aborta ao iniciar em sessões X11.
 Os builds de distribuição usam Python 3.12 e dependências fixadas em `uv.lock`.
 Os testes geram gravações sintéticas usando uma instalação completa de FFmpeg,
 com libopus e libvpx; não usam suas gravações. A versão reduzida incluída no pacote
