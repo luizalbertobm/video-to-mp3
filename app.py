@@ -1,69 +1,62 @@
 #!/usr/bin/env python3
-"""Conversor de WebM e MP4 para MP3 integrado ao desktop GTK do Linux."""
-
+"""Conversor local de WebM/MP4 para MP3, para Linux, macOS e Windows."""
 import os
 import queue
 import sys
 import threading
 from pathlib import Path
 
-import gi
-
-gi.require_version('Gtk', '3.0')
-from gi.repository import Gio, GLib, Gtk
+from PySide6.QtCore import QTimer, QUrl
+from PySide6.QtGui import QDesktopServices
+from PySide6.QtWidgets import QApplication, QDialog, QMainWindow, QMessageBox
 
 from converter import SOURCE_EXTENSIONS, ConversionCancelled, convert
 from dialogs import file_chooser, show_error
+from runtime import APP_ID, APP_NAME, VERSION
 from ui import build_window
 
 
-class ConverterWindow(Gtk.ApplicationWindow):
-    def __init__(self, application=None):
-        super().__init__(application=application)
-        self.source = None
-        self.destination = None
-        self.output = None
-        self.worker = None
+class ConverterWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.source = self.destination = self.output = self.worker = None
         self.cancelled = threading.Event()
         self.events = queue.Queue()
-        self.closing = False
-        self.working = False
-        self.pulsing = False
-        self.chooser = None
-        self.close_dialog = None
+        self.closing = self.working = False
+        self.chooser = self.close_dialog = None
         build_window(self)
-        self.connect('delete-event', self.request_close)
-        self.connect('destroy', self._destroyed)
-        self.poll_id = GLib.timeout_add(100, self._poll)
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self._poll)
+        self.timer.start(100)
 
-    def choose_source(self, *_):
+    def choose_source(self):
         self._choose(False)
 
-    def choose_destination(self, *_):
+    def choose_destination(self):
         self._choose(True)
 
     def _choose(self, save):
         if self.chooser or self.working:
             return
-        self.chooser = file_chooser(self, save=save)
+        dialog = self.chooser = file_chooser(self, save=save)
         current = self.destination if save else self.source
         if current:
-            self.chooser.set_current_folder(str(current.parent))
+            dialog.setDirectory(str(current.parent))
             if save:
-                self.chooser.set_current_name(current.name)
+                dialog.selectFile(current.name)
         elif save:
-            self.chooser.set_current_name('reuniao.mp3')
-        self.chooser.connect('response', self._file_selected, save)
-        self.chooser.show()
+            dialog.selectFile('reuniao.mp3')
+        dialog.finished.connect(lambda result: self._file_selected(dialog, result, save))
+        dialog.open()
 
-    def _file_selected(self, dialog, response, save):
-        selected = dialog.get_filename() if response == Gtk.ResponseType.ACCEPT else None
-        dialog.destroy()
+    def _file_selected(self, dialog, result, save):
+        paths = dialog.selectedFiles() if result == QDialog.DialogCode.Accepted else []
+        dialog.deleteLater()
         self.chooser = None
-        if not selected:
+        if not paths:
             return
         if save:
-            target = Path(selected)
+            target = Path(paths[0])
             if target.suffix.lower() != '.mp3':
                 target = Path(str(target) + '.mp3')
             if os.path.lexists(target):
@@ -73,9 +66,10 @@ class ConverterWindow(Gtk.ApplicationWindow):
             self.destination_row.set_path(target)
             self._reset_result()
         else:
-            self.select_source(Path(selected))
+            self.select_source(Path(paths[0]))
 
     def select_source(self, source):
+        source = source.absolute()
         if source.suffix.lower() not in SOURCE_EXTENSIONS or not source.is_file():
             show_error(self, 'Arquivo inválido', 'Selecione uma gravação no formato WebM ou MP4.')
             return
@@ -93,32 +87,33 @@ class ConverterWindow(Gtk.ApplicationWindow):
 
     def _reset_result(self):
         self.output = None
-        self.folder_button.set_sensitive(False)
-        self.bar.set_fraction(0)
-        self.bar.set_text('Pronto para converter')
-        self.status.set_text('Confira o destino e clique em Converter para MP3.')
+        self.folder_button.setEnabled(False)
+        self.bar.setRange(0, 100)
+        self.bar.setValue(0)
+        self.bar.setFormat('Pronto para converter')
+        self.status.setText('Confira o destino e clique em Converter para MP3.')
+        self.status.setToolTip('')
 
     def _busy(self, busy):
         self.working = busy
-        self.source_row.button.set_sensitive(not busy)
-        self.destination_row.button.set_sensitive(not busy and self.source is not None)
-        self.quality.set_sensitive(not busy)
-        self.start_button.set_sensitive(not busy and self.source is not None)
-        self.cancel_button.set_sensitive(busy)
+        self.source_row.button.setEnabled(not busy)
+        self.destination_row.button.setEnabled(not busy and self.source is not None)
+        self.quality.setEnabled(not busy)
+        self.start_button.setEnabled(not busy and self.source is not None)
+        self.cancel_button.setEnabled(busy)
 
-    def start(self, *_):
+    def start(self):
         if self.working or not self.source or not self.destination:
             return
         source, destination = self.source, self.destination
-        bitrate = int(self.quality.get_active_id())
+        bitrate = self.quality.currentData()
         self.cancelled.clear()
         self.output = None
-        self.folder_button.set_sensitive(False)
+        self.folder_button.setEnabled(False)
         self._busy(True)
-        self.pulsing = True
-        self.bar.set_fraction(0)
-        self.bar.set_text('Analisando…')
-        self.status.set_text('Analisando a gravação…')
+        self.bar.setRange(0, 0)
+        self.bar.setFormat('Analisando…')
+        self.status.setText('Analisando a gravação…')
 
         def work():
             try:
@@ -130,7 +125,7 @@ class ConverterWindow(Gtk.ApplicationWindow):
             except Exception as error:
                 self.events.put(('error', str(error)))
 
-        self.worker = threading.Thread(target=work, daemon=True)
+        self.worker = threading.Thread(target=work)
         self.worker.start()
 
     def _poll(self):
@@ -138,96 +133,87 @@ class ConverterWindow(Gtk.ApplicationWindow):
             while True:
                 kind, value = self.events.get_nowait()
                 if kind == 'progress':
-                    self.status.set_text('Cancelando…' if self.cancelled.is_set() else 'Convertendo o áudio…')
-                    self.pulsing = value is None
-                    self.bar.set_text('Convertendo…' if value is None else f'{value:.0f}%')
+                    self.status.setText('Cancelando…' if self.cancelled.is_set() else 'Convertendo o áudio…')
+                    self.bar.setRange(0, 0 if value is None else 100)
+                    self.bar.setFormat('Convertendo…' if value is None else f'{value:.0f}%')
                     if value is not None:
-                        self.bar.set_fraction(value / 100)
+                        self.bar.setValue(round(value))
                 else:
                     self._finish(kind, value)
         except queue.Empty:
             pass
-        if self.pulsing:
-            self.bar.pulse()
         if self.closing and not (self.worker and self.worker.is_alive()):
-            self.poll_id = None
-            self.destroy()
-            return GLib.SOURCE_REMOVE
-        return GLib.SOURCE_CONTINUE
+            self.close()
 
     def _finish(self, kind, value):
-        self.pulsing = False
         self._busy(False)
+        self.bar.setRange(0, 100)
         if kind == 'done':
             self.output = value
-            self.bar.set_fraction(1)
-            self.bar.set_text('Concluído')
-            self.status.set_text(f'MP3 salvo com sucesso: {value.name}')
-            self.status.set_tooltip_text(str(value))
-            self.folder_button.set_sensitive(True)
+            self.bar.setValue(100)
+            self.bar.setFormat('Concluído')
+            self.status.setText(f'MP3 salvo com sucesso: {value.name}')
+            self.status.setToolTip(str(value))
+            self.folder_button.setEnabled(True)
         else:
-            self.bar.set_fraction(0)
-            self.bar.set_text('Cancelado' if kind == 'cancelled' else 'Falha na conversão')
-            self.status.set_text('Conversão cancelada.' if kind == 'cancelled' else 'Não foi possível converter o arquivo.')
+            self.bar.setValue(0)
+            self.bar.setFormat('Cancelado' if kind == 'cancelled' else 'Falha na conversão')
+            self.status.setText('Conversão cancelada.' if kind == 'cancelled' else 'Não foi possível converter o arquivo.')
             if kind == 'error' and not self.closing:
                 show_error(self, 'Erro na conversão', value)
 
-    def cancel(self, *_):
+    def cancel(self):
         self.cancelled.set()
-        self.cancel_button.set_sensitive(False)
-        self.status.set_text('Cancelando…')
+        self.cancel_button.setEnabled(False)
+        self.status.setText('Cancelando…')
 
-    def open_folder(self, *_):
-        if self.output:
-            try:
-                Gio.AppInfo.launch_default_for_uri(self.output.parent.as_uri(), None)
-            except GLib.Error as error:
-                show_error(self, 'Não foi possível abrir a pasta', str(error))
+    def open_folder(self):
+        if self.output and not QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.output.parent))):
+            show_error(self, 'Não foi possível abrir a pasta', str(self.output.parent))
 
-    def request_close(self, *_):
-        if not self.working:
-            return False
-        if not self.close_dialog:
-            self.close_dialog = Gtk.MessageDialog(
-                transient_for=self, modal=True, destroy_with_parent=True,
-                message_type=Gtk.MessageType.QUESTION, buttons=Gtk.ButtonsType.YES_NO,
-                text='Cancelar a conversão e fechar?',
-            )
-            self.close_dialog.set_default_response(Gtk.ResponseType.NO)
-            self.close_dialog.connect('response', self._close_response)
-            self.close_dialog.show()
-        return True
+    def closeEvent(self, event):
+        if self.working or (self.worker and self.worker.is_alive()):
+            event.ignore()
+            if not self.closing and self.close_dialog is None:
+                dialog = self.close_dialog = QMessageBox(
+                    QMessageBox.Icon.Question, APP_NAME, 'Cancelar a conversão e fechar?',
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, self)
+                dialog.button(QMessageBox.StandardButton.Yes).setText('Sim')
+                dialog.button(QMessageBox.StandardButton.No).setText('Não')
+                dialog.setDefaultButton(QMessageBox.StandardButton.No)
+                dialog.finished.connect(self._close_response)
+                dialog.open()
+            return
+        if self.close_dialog:
+            self.close_dialog.reject()
+        if self.chooser:
+            self.chooser.reject()
+        self.timer.stop()
+        event.accept()
 
-    def _close_response(self, dialog, response):
-        dialog.destroy()
+    def _close_response(self, response):
+        self.close_dialog.deleteLater()
         self.close_dialog = None
-        if response == Gtk.ResponseType.YES:
+        if response == QMessageBox.StandardButton.Yes:
             self.closing = True
             self.cancel()
-            self.set_sensitive(False)
-
-    def _destroyed(self, *_):
-        if self.poll_id:
-            GLib.source_remove(self.poll_id)
-            self.poll_id = None
-        if self.chooser:
-            self.chooser.destroy()
-            self.chooser = None
+            self.setEnabled(False)
 
 
-class ConverterApplication(Gtk.Application):
-    def __init__(self):
-        super().__init__(application_id='net.beecoders.WebmToMp3')
-
-    def do_activate(self):
-        window = self.get_active_window()
-        if window is None:
-            window = ConverterWindow(self)
-        window.show_all()
-        window.present()
+def main():
+    # Usado pelo CI para testar o executável completo, sem Python ou FFmpeg no PATH.
+    if len(sys.argv) > 1 and sys.argv[1] == '--smoke-test':
+        from smoke_test import run
+        return run(Path(sys.argv[2]))
+    application = QApplication(sys.argv)
+    application.setApplicationName(APP_NAME)
+    application.setApplicationVersion(VERSION)
+    application.setOrganizationDomain('beecoders.net')
+    application.setDesktopFileName(APP_ID)
+    window = ConverterWindow()
+    window.show()
+    return application.exec()
 
 
 if __name__ == '__main__':
-    GLib.set_prgname('video-to-mp3')
-    GLib.set_application_name('Vídeo para MP3')
-    sys.exit(ConverterApplication().run(sys.argv))
+    sys.exit(main())

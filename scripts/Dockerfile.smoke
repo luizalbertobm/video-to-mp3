@@ -1,0 +1,6 @@
+# Desktop system libraries only: deliberately no Python or FFmpeg.
+FROM ubuntu:22.04
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1 libegl1 libopengl0 libfontconfig1 fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
+ENV QT_QPA_PLATFORM=offscreen
